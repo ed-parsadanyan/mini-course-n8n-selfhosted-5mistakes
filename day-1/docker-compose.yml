@@ -1,0 +1,91 @@
+version: '3.5'
+
+services:
+
+# Traefik reverse proxy
+  traefik:
+    image: "traefik"
+    restart: always
+    command:
+      - "--api=false"
+      - "--api.insecure=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
+      - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
+      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${DATA_FOLDER}/traefik/letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+# PostgreSQL container
+  db-n8n: 
+    container_name: db-n8n
+    environment: 
+      POSTGRES_DB: "${N8N_DATABASE_NAME}"
+      POSTGRES_PASSWORD: "${N8N_DATABASE_PW}"
+      POSTGRES_USER: "${N8N_DATABASE_USER}"
+    healthcheck: 
+      interval: 10s
+      retries: 10
+      test: "pg_isready -U ${N8N_DATABASE_USER} -d ${N8N_DATABASE_NAME}"
+      timeout: 2s
+    image: "postgres:14-alpine"
+    restart: always
+    volumes: 
+      - "${DATA_FOLDER}/db-n8n:/var/lib/postgresql/data"
+
+# Latest n8n version
+  n8n:
+    image: n8nio/n8n
+    user: "1000:1000"
+    restart: always
+    depends_on:
+      - db-n8n
+    ports:
+      - "127.0.0.1:5678:5678"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`${N8N_SUBDOMAIN}.${DOMAIN_NAME}`)
+      - traefik.http.routers.n8n.tls=true
+      - traefik.http.routers.n8n.entrypoints=web,websecure
+      - traefik.http.routers.n8n.tls.certresolver=mytlschallenge
+      - traefik.http.middlewares.n8n.headers.SSLRedirect=true
+      - traefik.http.middlewares.n8n.headers.STSSeconds=315360000
+      - traefik.http.middlewares.n8n.headers.browserXSSFilter=true
+      - traefik.http.middlewares.n8n.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.n8n.headers.forceSTSHeader=true
+      - traefik.http.middlewares.n8n.headers.SSLHost=${DOMAIN_NAME}
+      - traefik.http.middlewares.n8n.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.n8n.headers.STSPreload=true
+      - traefik.http.routers.n8n.middlewares=n8n@docker
+    environment:
+      - NODE_ENV=production
+      - EXECUTIONS_PROCESS=main
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+
+      - N8N_HOST=${N8N_SUBDOMAIN}.${DOMAIN_NAME}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://${N8N_SUBDOMAIN}.${DOMAIN_NAME}/
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=db-n8n
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=${N8N_DATABASE_USER}
+      - DB_POSTGRESDB_PASSWORD=${N8N_DATABASE_PW}
+      - DB_POSTGRESDB_DATABASE=${N8N_DATABASE_NAME}
+
+      - N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=*
+    volumes:
+      - ${DATA_FOLDER}/.n8n:/home/node/.n8n
