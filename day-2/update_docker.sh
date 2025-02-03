@@ -32,7 +32,7 @@ docker system prune -f
 # 2. Hetzner Storage Box using password file
 # Create a file '.storage_pass' with just the password in it
 # chmod 600 .storage_pass to secure it
-#sshpass -f .storage_pass scp -P 23 "$SNAPSHOT_NAME" "u357910@u357910.your-storagebox.de:./$SNAPSHOT_NAME"
+#sshpass -f .storage_pass scp -P 23 "$SNAPSHOT_NAME" "user@user.your-storagebox.de:./$SNAPSHOT_NAME"
 
 # 3. Using environment variables
 # Export these variables before running the script:
